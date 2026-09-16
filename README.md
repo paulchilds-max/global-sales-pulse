@@ -1,4 +1,4 @@
-# My First Project
+# Global Sales Pulse
 
 I'm learning how to use GitHub.
 
