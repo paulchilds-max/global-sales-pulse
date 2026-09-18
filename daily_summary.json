@@ -1,0 +1,19 @@
+{
+  "total_mediation_deals": 12,
+  "deals_by_stage": {
+    "Sales Qualified Lead": 3,
+    "Unknown stage (1403129099)": 3,
+    "MSA Shared with Customer": 1,
+    "Sales proposal": 1,
+    "Started Outreach": 4
+  },
+  "value_by_stage": {
+    "Sales Qualified Lead": 166119.97999999998,
+    "Unknown stage (1403129099)": 28366.44,
+    "MSA Shared with Customer": 3246.0,
+    "Sales proposal": 50132.0,
+    "Started Outreach": 0.0
+  },
+  "closed_won_count": 0,
+  "closed_won_value": 0.0
+}
