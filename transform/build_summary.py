@@ -10,12 +10,17 @@ What this does:
   4. Produces a clean daily summary: deal counts by stage, and (once we
      confirm won/lost logic) closed-won totals.
 
-NOTE — OPEN QUESTION FLAGGED BY PAUL'S PLAN:
-  The Mediation Pipeline stage list has no "Closed Lost" stage. Until
-  Paul confirms how lost deals are actually tracked (a separate HubSpot
-  property, archiving, or a missing stage), this script only reports
-  "Signed" as closed-won and does NOT attempt to calculate closed-lost.
-  Search for "TODO: WON/LOST LOGIC" below once that's confirmed.
+OPEN QUESTIONS FLAGGED FOR PAUL (defaults chosen below — override if wrong):
+  1. "Sales Qualified Out" is currently treated as a distinct
+     "disqualified" bucket, NOT counted as closed-lost, since it sits
+     before "Closed Lost" in the stage list and may just mean
+     "not ready" rather than "we lost the deal."
+  2. "Paused" and "Churned" are counted as having been won at some
+     point (they're past Signed), but are broken out separately as
+     "at_risk_or_churned" rather than folded into a flat closed-won
+     number, since lumping them in would overstate current healthy
+     revenue.
+  Search for "TODO: WON/LOST LOGIC" below to change either behavior.
 
 Run it (after fetch_hubspot.py has produced raw_deals.json):
   python transform/build_summary.py
@@ -40,11 +45,28 @@ STAGE_ID_TO_NAME = {
     "1403129089": "Internal Review and Approval",
     "1403129090": "MSA Shared with Customer",
     "1403129091": "Signed",
+    "1403129092": "Waiting to Start Integration",
+    "1403129093": "Integrating",
+    "1403129094": "Live & Testing",
+    "1403129095": "Fully Scaled",
+    "1403129096": "Paused",
+    "1403129097": "Churned",
+    "1403129099": "Sales Qualified Out",
+    "1403129100": "Closed Lost",
 }
 
-# The stage that represents a won deal. Update this if "Signed" isn't
-# the right signal, or once real closed-lost logic is confirmed.
-WON_STAGE_NAME = "Signed"
+# TODO: WON/LOST LOGIC — stages counted as "won" (post-signature).
+WON_STAGE_NAMES = {
+    "Signed", "Waiting to Start Integration", "Integrating",
+    "Live & Testing", "Fully Scaled",
+}
+
+# TODO: WON/LOST LOGIC — won deals that have since gone inactive.
+AT_RISK_STAGE_NAMES = {"Paused", "Churned"}
+
+# TODO: WON/LOST LOGIC — explicitly lost. "Sales Qualified Out" is
+# deliberately excluded here — see open question #1 above.
+LOST_STAGE_NAMES = {"Closed Lost"}
 
 INPUT_FILE = "raw_deals.json"
 OUTPUT_FILE = "daily_summary.json"
@@ -93,13 +115,19 @@ def filter_and_label_mediation_deals(deals):
 def build_summary(deals):
     deals_by_stage = defaultdict(int)
     value_by_stage = defaultdict(float)
+    deal_names_by_stage = defaultdict(list)
 
     closed_won_count = 0
     closed_won_value = 0.0
+    at_risk_count = 0
+    at_risk_value = 0.0
+    closed_lost_count = 0
+    closed_lost_value = 0.0
+    disqualified_count = 0
+    disqualified_value = 0.0
 
     for deal in deals:
         stage = deal["stage_name"]
-        deals_by_stage[stage] += 1
 
         # amount can be missing/blank on early-stage deals
         try:
@@ -107,21 +135,41 @@ def build_summary(deals):
         except (TypeError, ValueError):
             amount = 0.0
 
-        value_by_stage[stage] += amount
+        # "Sales Qualified Out" isn't a real opportunity — excluded
+        # entirely from totals and stage breakdown, tracked separately.
+        if stage == "Sales Qualified Out":
+            disqualified_count += 1
+            disqualified_value += amount
+            continue
 
-        # TODO: WON/LOST LOGIC — replace this once Paul confirms how
-        # lost deals are actually tracked in HubSpot.
-        if stage == WON_STAGE_NAME:
+        deals_by_stage[stage] += 1
+        value_by_stage[stage] += amount
+        deal_names_by_stage[stage].append(deal["name"])
+
+        if stage in WON_STAGE_NAMES:
             closed_won_count += 1
             closed_won_value += amount
+        elif stage in AT_RISK_STAGE_NAMES:
+            at_risk_count += 1
+            at_risk_value += amount
+        elif stage in LOST_STAGE_NAMES:
+            closed_lost_count += 1
+            closed_lost_value += amount
 
     return {
-        "total_mediation_deals": len(deals),
+        # total_mediation_deals deliberately excludes "Sales Qualified Out"
+        "total_mediation_deals": sum(deals_by_stage.values()),
         "deals_by_stage": dict(deals_by_stage),
         "value_by_stage": dict(value_by_stage),
+        "deal_names_by_stage": dict(deal_names_by_stage),
         "closed_won_count": closed_won_count,
         "closed_won_value": closed_won_value,
-        # closed_lost intentionally omitted until won/lost logic is confirmed
+        "at_risk_or_churned_count": at_risk_count,
+        "at_risk_or_churned_value": at_risk_value,
+        "closed_lost_count": closed_lost_count,
+        "closed_lost_value": closed_lost_value,
+        "disqualified_count": disqualified_count,
+        "disqualified_value": disqualified_value,
     }
 
 # -----------------------------------------------------------------------
@@ -145,3 +193,9 @@ if __name__ == "__main__":
 
     print(f"Saved summary to {OUTPUT_FILE}")
     print(json.dumps(summary, indent=2))
+
+    print("\n--- Deals that moved, by stage ---")
+    for stage, names in summary["deal_names_by_stage"].items():
+        print(f"\n{stage} ({len(names)}):")
+        for name in names:
+            print(f"  - {name}")
